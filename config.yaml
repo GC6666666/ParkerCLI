@@ -1,0 +1,17 @@
+app:
+    env: development
+    name: ParkerCli
+    version: 0.1.0
+database:
+    driver: mysql
+    host: localhost
+    name: parker_db
+    password: ""
+    port: 3306
+    user: root
+log:
+    level: info
+    path: ./logs
+server:
+    host: 0.0.0.0
+    port: "9000"

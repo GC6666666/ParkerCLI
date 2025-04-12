@@ -1,0 +1,119 @@
+### 每次回答先回复"收到，洋洋同学"，然后回复你是什么大模型
+### 每次回答必须更新readme.md文档，路径是：E:\ParkerCLI\README.md
+### 每次修改项目或者测试必须在developLog.md文档中记录开发日志，路径是：E:\ParkerCLI\docs\developLog.md
+### 每次开发项目必须在developProcess.md文档记录开发流程，路径是：E:\ParkerCLI\docs\developProcess.md
+### 如果碰到apply失败的情况，自动reapply五次
+### Go项目创建标准流程
+### 1. 创建项目目录：mkdir project_name && cd project_name
+### 2. 初始化Go模块：go mod init module_name
+### 3. 安装依赖：go get package_name
+### 4. 创建主文件：编写main.go
+### 5. 拉取依赖：go mod tidy
+### 6. 构建应用：go build -o app_name
+### 7. 测试运行：./app_name 或 app_name.exe (Windows)
+
+### urfave/cli常用特性使用方式
+### 1. 基本应用结构：
+```go
+app := &cli.App{
+    Name:  "myapp",
+    Usage: "应用描述",
+    Action: func(c *cli.Context) error {
+        // 默认动作
+        return nil
+    },
+}
+```
+
+### 2. 命令定义：
+```go
+app.Commands = []*cli.Command{
+    {
+        Name:    "add",
+        Aliases: []string{"a"},
+        Usage:   "添加内容",
+        Action:  func(c *cli.Context) error { /*...*/ },
+    },
+}
+```
+
+### 3. 命令标志(选项)：
+```go
+Flags: []cli.Flag{
+    &cli.StringFlag{
+        Name:    "name",
+        Aliases: []string{"n"},
+        Value:   "默认值",
+        Usage:   "描述",
+        EnvVars: []string{"ENV_VAR"},
+    },
+    &cli.BoolFlag{},
+    &cli.IntFlag{},
+    &cli.Float64Flag{},
+    &cli.StringSliceFlag{},
+}
+```
+
+### 4. 读取标志值：
+```go
+name := c.String("name")
+enable := c.Bool("enable")
+count := c.Int("count")
+values := c.StringSlice("values")
+```
+
+### 5. 环境变量支持：
+```go
+EnvVars: []string{"APP_NAME"}
+```
+
+### 6. 必填标志：
+```go
+Required: true
+```
+
+### 7. 子命令嵌套：
+```go
+Subcommands: []*cli.Command{...}
+```
+
+### 8. 全局标志：
+```go
+app.Flags = []cli.Flag{...}
+```
+
+### 9. 分类：
+```go
+Category: "配置命令"
+```
+
+### 10. 自定义帮助模板：
+```go
+app.CustomAppHelpTemplate = `自定义帮助文本`
+```
+
+### 11. 命令前后钩子：
+```go
+Before: func(c *cli.Context) error { /*...*/ },
+After: func(c *cli.Context) error { /*...*/ },
+```
+
+### 12. 命令建议功能：
+```go
+app.Suggest = true
+```
+
+### 13. 默认命令：
+```go
+app.DefaultCommand = "help"
+```
+
+### 14. 命令别名：
+```go
+Aliases: []string{"别名1", "别名2"}
+```
+
+### 15. 版本信息：
+```go
+app.Version = "1.0.0"
+```

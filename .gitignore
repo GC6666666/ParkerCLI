@@ -1,0 +1,25 @@
+# 编译生成的文件
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 测试二进制文件
+testbuild*
+
+# 日志文件
+*.log
+
+# 输出目录
+/bin/
+/vendor/
+
+# IDE配置
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db 
