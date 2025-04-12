@@ -1,12 +1,13 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/parker/ParkerCli/internal/debug"
 	"github.com/urfave/cli/v2"
 )
 
@@ -38,12 +39,19 @@ var TestCommand = &cli.Command{
 	},
 }
 
-func testUnitAction(c *cli.Context) error {
-	pkg := c.String("package")
-	verbose := c.Bool("verbose")
-	cover := c.Bool("cover")
-	coverProfile := c.String("coverprofile")
+// 扩展StandardDebugger以支持测试功能
+type TestDebugger struct {
+	*debug.StandardDebugger
+}
 
+func NewTestDebugger() *TestDebugger {
+	return &TestDebugger{
+		StandardDebugger: debug.NewStandardDebugger(),
+	}
+}
+
+// RunUnitTest 执行单元测试
+func (d *TestDebugger) RunUnitTest(pkg string, verbose bool, cover bool, coverProfile string) error {
 	fmt.Printf("运行单元测试，包路径: %s\n", pkg)
 
 	// 构建测试命令参数
@@ -63,59 +71,48 @@ func testUnitAction(c *cli.Context) error {
 	// 添加包路径
 	args = append(args, pkg)
 
-	// 创建命令
-	cmd := exec.Command("go", args...)
+	// 创建上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 
-	// 将命令的标准输出和错误输出连接到当前进程
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	// 设置工作目录为当前目录
-	cmd.Dir, _ = os.Getwd()
-
-	// 运行命令
-	fmt.Printf("执行: go %s\n", strings.Join(args, " "))
-	err := cmd.Run()
+	// 使用调试器的TestEndpoint方法执行命令
+	resp, err := d.TestEndpoint(ctx, "go", strings.Join(args, " "), "EXEC", 600)
+	if err != nil {
+		return fmt.Errorf("单元测试失败: %w", err)
+	}
 
 	// 如果生成了覆盖率报告，显示摘要
-	if err == nil && cover {
+	if cover {
 		absPath, _ := filepath.Abs(coverProfile)
 		fmt.Printf("覆盖率报告生成在: %s\n", absPath)
 
 		// 使用go tool cover生成HTML报告
 		htmlFile := strings.TrimSuffix(coverProfile, filepath.Ext(coverProfile)) + ".html"
-		coverCmd := exec.Command("go", "tool", "cover", "-html="+coverProfile, "-o", htmlFile)
-		coverCmd.Stdout = os.Stdout
-		coverCmd.Stderr = os.Stderr
 
-		if err := coverCmd.Run(); err == nil {
+		coverCtx, coverCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer coverCancel()
+
+		coverArgs := []string{"tool", "cover", "-html=" + coverProfile, "-o", htmlFile}
+		_, err := d.TestEndpoint(coverCtx, "go", strings.Join(coverArgs, " "), "EXEC", 60)
+		if err == nil {
 			absHtmlPath, _ := filepath.Abs(htmlFile)
 			fmt.Printf("HTML覆盖率报告: %s\n", absHtmlPath)
 		}
 	}
 
-	if err != nil {
-		return fmt.Errorf("单元测试失败: %w", err)
-	}
-
+	fmt.Println(debug.FormatHTTPResponse(resp))
 	fmt.Println("单元测试完成")
 	return nil
 }
 
-func testIntegrationAction(c *cli.Context) error {
-	tags := c.String("tags")
-	setup := c.Bool("setup")
-	cleanup := c.Bool("cleanup")
-
+// RunIntegrationTest 执行集成测试
+func (d *TestDebugger) RunIntegrationTest(tags string, setup bool, cleanup bool) error {
 	fmt.Printf("运行集成测试，标签: %s\n", tags)
 
 	// 运行测试前的环境设置
 	if setup {
 		fmt.Println("设置集成测试环境...")
-		// 这里可以启动数据库容器、初始化环境等
-
-		// 示例: 启动测试用的Docker容器
-		if err := setupTestEnvironment(); err != nil {
+		if err := d.SetupTestEnvironment(); err != nil {
 			return fmt.Errorf("设置测试环境失败: %w", err)
 		}
 	}
@@ -124,10 +121,7 @@ func testIntegrationAction(c *cli.Context) error {
 	if cleanup {
 		defer func() {
 			fmt.Println("清理集成测试环境...")
-			// 这里可以清理数据库、删除临时文件等
-
-			// 示例: 停止并删除测试容器
-			if err := cleanupTestEnvironment(); err != nil {
+			if err := d.CleanupTestEnvironment(); err != nil {
 				fmt.Printf("清理测试环境时出错: %s\n", err)
 			}
 		}()
@@ -136,31 +130,52 @@ func testIntegrationAction(c *cli.Context) error {
 	// 构建测试命令
 	args := []string{"test", "-tags", tags, "./..."}
 
-	cmd := exec.Command("go", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// 创建上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 
-	fmt.Printf("执行: go %s\n", strings.Join(args, " "))
-	if err := cmd.Run(); err != nil {
+	// 执行测试
+	resp, err := d.TestEndpoint(ctx, "go", strings.Join(args, " "), "EXEC", 600)
+	if err != nil {
 		return fmt.Errorf("集成测试失败: %w", err)
 	}
 
+	fmt.Println(debug.FormatHTTPResponse(resp))
 	fmt.Println("集成测试完成")
 	return nil
 }
 
-// 设置测试环境
-func setupTestEnvironment() error {
+// SetupTestEnvironment 设置测试环境
+func (d *TestDebugger) SetupTestEnvironment() error {
 	fmt.Println("模拟环境设置: 创建测试数据库、启动Docker容器等")
 	// 在实际应用中，你可以在这里使用Docker API启动测试容器
-	// 这里仅做演示
 	return nil
 }
 
-// 清理测试环境
-func cleanupTestEnvironment() error {
+// CleanupTestEnvironment 清理测试环境
+func (d *TestDebugger) CleanupTestEnvironment() error {
 	fmt.Println("模拟环境清理: 删除测试数据库、停止Docker容器等")
 	// 在实际应用中，你可以在这里停止并删除测试容器
-	// 这里仅做演示
 	return nil
+}
+
+func testUnitAction(c *cli.Context) error {
+	pkg := c.String("package")
+	verbose := c.Bool("verbose")
+	cover := c.Bool("cover")
+	coverProfile := c.String("coverprofile")
+
+	// 创建测试调试器
+	tester := NewTestDebugger()
+	return tester.RunUnitTest(pkg, verbose, cover, coverProfile)
+}
+
+func testIntegrationAction(c *cli.Context) error {
+	tags := c.String("tags")
+	setup := c.Bool("setup")
+	cleanup := c.Bool("cleanup")
+
+	// 创建测试调试器
+	tester := NewTestDebugger()
+	return tester.RunIntegrationTest(tags, setup, cleanup)
 }

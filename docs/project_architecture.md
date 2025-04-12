@@ -23,6 +23,7 @@ ParkerCli/
 │  ├─ runner/         # 服务运行器
 │  ├─ migrator/       # 数据库迁移
 │  ├─ builder/        # 构建工具
+│  ├─ logs/           # 日志管理
 │  └─ utils/          # 通用工具函数
 ├─ pkg/               # 可重用公共库
 │  ├─ logger/         # 日志库
@@ -93,6 +94,8 @@ func xxxSubAction(c *cli.Context) error {
 - **runner/**：集成Gin框架，管理Web服务和定时任务的生命周期
 - **migrator/**：实现数据库迁移逻辑，版本跟踪和回滚
 - **builder/**：处理Go代码编译和Docker镜像构建
+- **logs/**：管理日志文件操作，包括实时追踪和内容过滤
+- **utils/**：提供各种通用工具函数，被其他模块共享使用
 
 ### 3. 公共库 (pkg/)
 
@@ -266,7 +269,8 @@ graph LR
         B3[config]
         B4[builder]
         B5[migrator]
-        B6[utils]
+        B6[logs]
+        B7[utils]
     end
     
     subgraph "pkg"
@@ -280,23 +284,17 @@ graph LR
     A4 --> B4
     A5 --> B1
     A5 --> B2
-    A6 --> C1
+    A6 --> B6
     A7 --> B5
     A8 --> B4
     
     B1 --> C1
-    B1 --> C2
     B2 --> C1
     B3 --> C1
     B4 --> C1
     B5 --> C1
     B6 --> C1
-    
-    B1 --> B6
-    B2 --> B6
-    B3 --> B6
-    B4 --> B6
-    B5 --> B6
+    B7 --> C1
 ```
 
 ### debug命令调用流程
@@ -446,34 +444,43 @@ sequenceDiagram
     participant User
     participant LogsCmd as cmd/logs.go
     participant LogsImpl as internal/logs
-    participant ConfigImpl as internal/config
-    participant FileSystem as 文件系统
-    participant Logger as pkg/logger
+    participant FS as 文件系统
     
-    User->>LogsCmd: parkercli logs show
+    User->>LogsCmd: parkercli logs tail --file=app.log
     LogsCmd->>LogsCmd: 解析参数
-    LogsCmd->>ConfigImpl: 获取日志配置
-    LogsCmd->>LogsImpl: NewLogsManager(config)
-    LogsCmd->>LogsImpl: ShowLogs(lines, follow)
-    LogsImpl->>FileSystem: 读取日志文件
-    LogsImpl-->>LogsCmd: 返回格式化日志
-    LogsCmd-->>User: 显示日志内容
+    LogsCmd->>LogsImpl: NewStandardLogsManager()
+    LogsCmd->>LogsImpl: TailLogs(file, lines, interval)
+    LogsImpl->>FS: 检查文件存在性
+    LogsImpl->>FS: 读取最后N行
+    LogsImpl->>LogsImpl: 创建LogStream
+    activate LogsImpl
+    LogsImpl-->>LogsCmd: 返回LogStream
+    LogsCmd->>LogsCmd: 监听LogStream.Lines通道
     
-    User->>LogsCmd: parkercli logs filter --level=ERROR
-    LogsCmd->>LogsCmd: 解析过滤参数
-    LogsCmd->>LogsImpl: FilterLogs(level, service, keyword)
-    LogsImpl->>FileSystem: 读取日志文件
-    LogsImpl->>LogsImpl: 应用过滤器
-    LogsImpl-->>LogsCmd: 返回过滤后的日志
-    LogsCmd-->>User: 显示过滤结果
+    loop 文件变化检测
+        LogsImpl->>FS: 检查文件大小变化
+        FS-->>LogsImpl: 文件大小
+        alt 文件有新内容
+            LogsImpl->>FS: 读取新内容
+            FS-->>LogsImpl: 新行
+            LogsImpl->>LogsCmd: 发送新行到Lines通道
+            LogsCmd-->>User: 显示新行
+        end
+    end
     
-    User->>LogsCmd: parkercli logs tail -f
-    LogsCmd->>LogsImpl: TailLogs(follow)
-    LogsImpl->>FileSystem: 打开日志文件
-    LogsImpl->>LogsImpl: 监听文件变化
-    FileSystem-->>LogsImpl: 新日志内容
-    LogsImpl-->>LogsCmd: 实时传输日志
-    LogsCmd-->>User: 实时显示日志
+    User->>LogsCmd: Ctrl+C
+    LogsCmd->>LogsImpl: LogStream.Close()
+    deactivate LogsImpl
+    LogsCmd-->>User: 退出日志追踪
+    
+    User->>LogsCmd: parkercli logs grep --keyword=ERROR
+    LogsCmd->>LogsCmd: 解析参数
+    LogsCmd->>LogsImpl: NewStandardLogsManager()
+    LogsCmd->>LogsImpl: FilterLogs(file, keyword, ignoreCase, useRegex)
+    LogsImpl->>FS: 读取日志文件
+    LogsImpl->>LogsImpl: 按关键字过滤内容
+    LogsImpl-->>LogsCmd: 返回匹配行和统计信息
+    LogsCmd-->>User: 显示过滤结果和统计
 ```
 
 ### 服务运行流程
@@ -717,50 +724,23 @@ classDiagram
     
     class LogsManager {
         <<interface>>
-        +ShowLogs(lines int, follow bool) ([]LogEntry, error)
-        +FilterLogs(level, service, keyword string) ([]LogEntry, error)
-        +TailLogs(follow bool) (*LogStream, error)
+        +TailLogs(file, lines, interval) *LogStream
+        +FilterLogs(file, keyword, ignoreCase, useRegex) ([]string, int, error)
+        +ReadLastLines(file, lines) ([]string, error)
     }
     
     class StandardLogsManager {
-        -logFilePath string
-        -maxLines int
-        +ShowLogs(lines int, follow bool) ([]LogEntry, error)
-        +FilterLogs(level, service, keyword string) ([]LogEntry, error)
-        +TailLogs(follow bool) (*LogStream, error)
+        +NewStandardLogsManager() *StandardLogsManager
+        +TailLogs(file, lines, interval) *LogStream
+        +FilterLogs(file, keyword, ignoreCase, useRegex) ([]string, int, error)
+        +ReadLastLines(file, lines) ([]string, error)
     }
     
-    class TestRunner {
-        <<interface>>
-        +RunUnitTests(pkgs []string, verbose bool) (*TestResult, error)
-        +RunIntegrationTests(tags []string) (*TestResult, error)
-        +GenerateCoverageReport() (*CoverageReport, error)
-    }
-    
-    class StandardTestRunner {
-        -projectRoot string
-        -testTimeout time.Duration
-        -coverageThreshold float64
-        +RunUnitTests(pkgs []string, verbose bool) (*TestResult, error)
-        +RunIntegrationTests(tags []string) (*TestResult, error)
-        +GenerateCoverageReport() (*CoverageReport, error)
-    }
-    
-    class ReleaseManager {
-        <<interface>>
-        +PrepareRelease(version string) error
-        +BuildRelease(platforms []string) (*ReleaseArtifacts, error)
-        +PublishRelease(tag string) error
-    }
-    
-    class StandardReleaseManager {
-        -builder Builder
-        -config Config
-        -outputDir string
-        -releaseRepo string
-        +PrepareRelease(version string) error
-        +BuildRelease(platforms []string) (*ReleaseArtifacts, error)
-        +PublishRelease(tag string) error
+    class LogStream {
+        +Lines chan string
+        +File string
+        -stopChan chan struct{}
+        +Close()
     }
     
     Logger <|.. StandardLogger
@@ -769,9 +749,38 @@ classDiagram
     MigrationService <|.. StandardMigrator
     ServerRunner <|.. StandardRunner
     TaskRunner <|.. StandardRunner
-    LogsManager <|.. StandardLogsManager
-    TestRunner <|.. StandardTestRunner
+    LogsManager <|.. StandardLogsManager : 实现
+    StandardLogsManager --> LogStream : 创建
     ReleaseManager <|.. StandardReleaseManager
 ```
 
 通过以上流程图和函数关系图，可以更清晰地了解ParkerCli的整体架构和各模块间的交互关系。这种可视化的方式有助于新开发者快速理解项目结构，也便于在后续开发中保持架构的一致性和延续性。
+
+### 日志模块类图
+
+```mermaid
+classDiagram
+    class LogsManager {
+        <<interface>>
+        +TailLogs(file, lines, interval) *LogStream
+        +FilterLogs(file, keyword, ignoreCase, useRegex) ([]string, int, error)
+        +ReadLastLines(file, lines) ([]string, error)
+    }
+    
+    class StandardLogsManager {
+        +NewStandardLogsManager() *StandardLogsManager
+        +TailLogs(file, lines, interval) *LogStream
+        +FilterLogs(file, keyword, ignoreCase, useRegex) ([]string, int, error)
+        +ReadLastLines(file, lines) ([]string, error)
+    }
+    
+    class LogStream {
+        +Lines chan string
+        +File string
+        -stopChan chan struct{}
+        +Close()
+    }
+    
+    LogsManager <|.. StandardLogsManager : 实现
+    StandardLogsManager --> LogStream : 创建
+```

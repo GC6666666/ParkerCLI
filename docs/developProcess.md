@@ -255,3 +255,100 @@
    - 用户体验改进，如更详细的输出信息
 
 此次重构是ParkerCLI模块化架构改造计划的一个重要里程碑，验证了我们的架构设计在实际应用中的可行性和优势。后续将继续重构其他命令模块，如logs、test和run等，逐步完成整个CLI工具的架构优化。
+
+## 日志模块重构过程 - 2023-10-12
+
+### 重构背景
+
+在项目模块化架构推进过程中，继run.go和test.go之后，我们对cmd/logs.go进行了重构。原先的实现将日志文件操作和命令处理混在一起，导致代码职责不清晰和复用性差。
+
+### 重构准备
+
+#### 1. 分析原有实现
+
+在重构前，我们对原有的logs.go实现进行了详细分析：
+- 包含tail和grep两个子命令
+- 功能涵盖日志实时追踪和内容过滤
+- 没有清晰的接口抽象
+- 业务逻辑直接嵌入在命令处理函数中
+
+#### 2. 定义模块结构
+
+为实现关注点分离，我们设计了internal/logs模块：
+- 定义LogsManager接口作为中心抽象
+- 创建StandardLogsManager作为默认实现
+- 分离日志流(LogStream)作为独立概念
+- 确保所有功能都可通过接口访问
+
+### 实现过程
+
+#### 1. 创建internal/logs/logs.go文件
+
+首先我们实现了核心日志管理模块：
+```go
+// LogsManager 日志管理器接口
+type LogsManager interface {
+    // TailLogs 追踪日志文件
+    TailLogs(file string, lines int, interval time.Duration) (*LogStream, error)
+    // FilterLogs 过滤日志
+    FilterLogs(file string, keyword string, ignoreCase bool, useRegex bool) ([]string, int, error)
+    // ReadLastLines 读取最后几行
+    ReadLastLines(file string, lines int) ([]string, error)
+}
+```
+
+#### 2. 实现日志流处理
+
+针对日志实时追踪，我们设计了LogStream结构，使用channel实现异步数据流：
+```go
+// LogStream 表示日志流
+type LogStream struct {
+    Lines    chan string  // 日志行通道
+    File     string       // 文件路径
+    stopChan chan struct{} // 停止信号
+}
+```
+
+#### 3. 重构cmd/logs.go
+
+最后，我们重构了命令处理函数，将所有业务逻辑委托给internal/logs模块：
+- logsTailAction专注于参数解析和结果显示
+- logsGrepAction同样只负责接口调用和结果展示
+- 保持命令和选项定义不变，确保向后兼容性
+
+### 测试验证
+
+我们通过以下方式验证了重构的效果：
+
+1. **功能测试**：
+   - 测试了logs tail命令的实时日志追踪功能
+   - 验证了logs grep命令的关键字过滤和正则匹配功能
+   - 确认了不同选项(lines, interval, ignore-case等)的正确行为
+
+2. **边界情况测试**：
+   - 测试了日志文件不存在的错误处理
+   - 验证了空日志文件和特殊字符过滤的行为
+   - 检查了大型日志文件的性能表现
+
+### 重构成果
+
+此次重构带来了明显的改进：
+
+1. **架构优化**：
+   - 实现了清晰的关注点分离
+   - 提高了代码的可读性和可维护性
+   - 创建了可复用的日志管理功能
+
+2. **功能增强**：
+   - 改进了日志读取的错误处理和边界条件检查
+   - 优化了实时日志跟踪的性能
+   - 增强了过滤功能的灵活性
+
+3. **开发体验提升**：
+   - LogsManager接口使日志功能可在其他模块中复用
+   - 简化了命令实现，使其更专注于用户交互
+   - 为未来添加新日志功能提供了扩展点
+
+此次重构是项目模块化架构持续推进的重要一步，使得日志相关功能符合了项目的整体架构设计理念。
+
+通过这次重构，我们更好地遵循了关注点分离的设计原则，提高了代码的可维护性，同时保持了功能的完整性和兼容性。
