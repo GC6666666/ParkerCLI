@@ -216,7 +216,9 @@ ParkerCli采用模块化、分层架构设计，主要分为命令层(cmd)、业
 - **cmd/debug.go** 使用了 **internal/debug** 模块，实现了调试功能
 - **cmd/config.go** 使用了 **internal/config** 模块，实现了配置管理功能
 - **cmd/build.go** 使用了 **internal/builder** 模块，实现了构建功能
+- **cmd/migrate.go** 使用了 **internal/migrator** 模块，实现了数据库迁移功能
 - 其他命令模块正在逐步重构，迁移到对应的internal实现中
+
 项目提供了详细的架构流程图和函数关系图，帮助开发者快速理解系统：
 
 - **命令执行流程图**：展示从用户输入到结果输出的完整路径
